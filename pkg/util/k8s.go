@@ -1,25 +1,11 @@
 package util
 
 import (
-	pluginTypes "github.com/argoproj/argo-rollouts/utils/plugin/types"
-	networkv2 "github.com/solo-io/solo-apis/client-go/networking.gloo.solo.io/v2"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
-
-func NewSoloNetworkV2K8sClient() (networkv2.Clientset, error) {
-	cfg, err := GetKubeConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	networkv2Clientset, err := networkv2.NewClientsetFromConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	return networkv2Clientset, nil
-}
 
 func GetKubeConfig() (*rest.Config, error) {
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -29,7 +15,31 @@ func GetKubeConfig() (*rest.Config, error) {
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 	config, err := kubeConfig.ClientConfig()
 	if err != nil {
-		return nil, pluginTypes.RpcError{ErrorString: err.Error()}
+		return nil, err
 	}
 	return config, nil
+}
+
+func GetKubernetesClient() (*kubernetes.Clientset, error) {
+	cfg, err := GetKubeConfig()
+	if err != nil {
+		return nil, err
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return cs, nil
+}
+
+func GetDynamicClient() (*dynamic.DynamicClient, error) {
+	cfg, err := GetKubeConfig()
+	if err != nil {
+		return nil, err
+	}
+	dynamicClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return dynamicClient, nil
 }

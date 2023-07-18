@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/argoproj-labs/rollouts-plugin-trafficrouter-glooplatform/pkg/util"
+	"github.com/argoproj-labs/rollouts-plugin-trafficrouter-glooplatform/pkg/gloo"
 	"github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	pluginTypes "github.com/argoproj/argo-rollouts/utils/plugin/types"
 	"github.com/sirupsen/logrus"
@@ -27,7 +27,7 @@ type RpcPlugin struct {
 	// temporary hack until mock clienset is fixed (missing some interface methods)
 	TestRouteTable *networkv2.RouteTable
 	LogCtx         *logrus.Entry
-	Client         networkv2.Clientset
+	Client         gloo.NetworkV2ClientSet
 }
 
 type GlooPlatformAPITrafficRouting struct {
@@ -92,15 +92,13 @@ func (r *RpcPlugin) InitPlugin() pluginTypes.RpcError {
 	if r.IsTest {
 		return pluginTypes.RpcError{}
 	}
-
-	r.LogCtx = r.LogCtx.WithField("PluginName", PluginName)
-	k, err := util.NewSoloNetworkV2K8sClient()
+	client, err := gloo.NewNetworkV2ClientSet()
 	if err != nil {
 		return pluginTypes.RpcError{
 			ErrorString: err.Error(),
 		}
 	}
-	r.Client = k
+	r.Client = client
 	return pluginTypes.RpcError{}
 }
 
@@ -176,7 +174,7 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		glooPluginConfig.RouteTableSelector.Namespace = rollout.Namespace
 	}
 
-	var rts *networkv2.RouteTableList
+	var rts []*networkv2.RouteTable
 
 	if !r.IsTest && !strings.EqualFold(glooPluginConfig.RouteTableSelector.Name, "") {
 		r.LogCtx.Debugf("getRouteTables using ns:name ref %s:%s to get single table", glooPluginConfig.RouteTableSelector.Name, glooPluginConfig.RouteTableSelector.Namespace)
@@ -184,10 +182,9 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		if err != nil {
 			return nil, err
 		}
+
 		r.LogCtx.Debugf("getRouteTables using ns:name ref %s:%s found 1 table", glooPluginConfig.RouteTableSelector.Name, glooPluginConfig.RouteTableSelector.Namespace)
-		rts = &networkv2.RouteTableList{
-			Items: []networkv2.RouteTable{*result},
-		}
+		rts = []*networkv2.RouteTable{result}
 	}
 
 	matched := []*GlooMatchedRouteTable{}
@@ -201,9 +198,10 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		opts.Namespace = glooPluginConfig.RouteTableSelector.Namespace
 	}
 
-	var err error
 	r.LogCtx.Debugf("getRouteTables listing tables with opts %+v", opts)
+	var err error
 	if !r.IsTest {
+
 		rts, err = r.Client.RouteTables().ListRouteTable(ctx, opts)
 		if err != nil {
 			return nil, err
@@ -211,15 +209,13 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 	}
 
 	if r.IsTest {
-		rts = &networkv2.RouteTableList{
-			Items: []networkv2.RouteTable{*r.TestRouteTable},
-		}
+		rts = []*networkv2.RouteTable{r.TestRouteTable}
 	}
 
-	r.LogCtx.Debugf("getRouteTables listing tables with opts %+v; found %d routeTables", opts, len(rts.Items))
-	for _, rt := range rts.Items {
+	r.LogCtx.Debugf("getRouteTables listing tables with opts %+v; found %d routeTables", opts, len(rts))
+	for _, rt := range rts {
 		matchedRt := &GlooMatchedRouteTable{
-			RouteTable: &rt,
+			RouteTable: rt,
 		}
 		// destination matching
 		if err := matchedRt.matchRoutes(r.LogCtx, rollout, glooPluginConfig); err != nil {
@@ -242,7 +238,7 @@ func (g *GlooMatchedRouteTable) matchRoutes(logCtx *logrus.Entry, rollout *v1alp
 		// find the destination that matches the stable svc
 		fw := httpRoute.GetForwardTo()
 		if fw == nil {
-			logCtx.Debugf("skipping route %s.%s becuase forwardTo is nil", g.RouteTable.Name, httpRoute.Name)
+			logCtx.Debugf("skipping route %s.%s because forwardTo is nil", g.RouteTable.Name, httpRoute.Name)
 			continue
 		}
 

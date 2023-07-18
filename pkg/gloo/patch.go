@@ -50,8 +50,8 @@ func BuildRouteTablePatch(current, desired *networkv2.RouteTable, opts ...PatchO
 		des.Labels = desired.Labels
 	}
 	if cfg.withSpec {
-		cur.Spec = current.Spec
-		des.Spec = desired.Spec
+		current.Spec.DeepCopyInto(&cur.Spec)
+		desired.Spec.DeepCopyInto(&des.Spec)
 	}
 
 	return createTwoWayMergePatch(cur, des, networkv2.RouteTable{})
