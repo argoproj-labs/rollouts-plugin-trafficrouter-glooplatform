@@ -25,7 +25,7 @@ type RouteTableClient interface {
 
 type RouteTableReader interface {
 	// Get retrieves a RouteTable for the given object key
-	GetRouteTable(ctx context.Context, key k8sclient.ObjectKey) (*networkv2.RouteTable, error)
+	GetRouteTable(ctx context.Context, name string, namespace string) (*networkv2.RouteTable, error)
 
 	// List retrieves list of RouteTables for a given namespace and list options.
 	ListRouteTable(ctx context.Context, opts ...k8sclient.ListOption) ([]*networkv2.RouteTable, error)
