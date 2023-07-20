@@ -185,11 +185,7 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 
 		r.LogCtx.Debugf("getRouteTables using ns:name ref %s:%s found 1 table", glooPluginConfig.RouteTableSelector.Name, glooPluginConfig.RouteTableSelector.Namespace)
 		rts = append(rts, result)
-	}
-
-	matched := []*GlooMatchedRouteTable{}
-
-	if strings.EqualFold(glooPluginConfig.RouteTableSelector.Name, "") {
+	} else {
 		opts := &k8sclient.ListOptions{}
 
 		if glooPluginConfig.RouteTableSelector.Labels != nil {
@@ -208,6 +204,8 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		}
 		r.LogCtx.Debugf("getRouteTables listing tables with opts %+v; found %d routeTables", opts, len(rts))
 	}
+
+	matched := []*GlooMatchedRouteTable{}
 
 	for _, rt := range rts {
 		matchedRt := &GlooMatchedRouteTable{
