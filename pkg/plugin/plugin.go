@@ -184,29 +184,31 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		}
 
 		r.LogCtx.Debugf("getRouteTables using ns:name ref %s:%s found 1 table", glooPluginConfig.RouteTableSelector.Name, glooPluginConfig.RouteTableSelector.Namespace)
-		rts = []*networkv2.RouteTable{result}
+		rts = append(rts, result)
 	}
 
 	matched := []*GlooMatchedRouteTable{}
 
-	opts := &k8sclient.ListOptions{}
+	if strings.EqualFold(glooPluginConfig.RouteTableSelector.Name, "") {
+		opts := &k8sclient.ListOptions{}
 
-	if glooPluginConfig.RouteTableSelector.Labels != nil {
-		opts.LabelSelector = labels.SelectorFromSet(glooPluginConfig.RouteTableSelector.Labels)
+		if glooPluginConfig.RouteTableSelector.Labels != nil {
+			opts.LabelSelector = labels.SelectorFromSet(glooPluginConfig.RouteTableSelector.Labels)
+		}
+		if !strings.EqualFold(glooPluginConfig.RouteTableSelector.Namespace, "") {
+			opts.Namespace = glooPluginConfig.RouteTableSelector.Namespace
+		}
+
+		r.LogCtx.Debugf("getRouteTables listing tables with opts %+v", opts)
+		var err error
+
+		rts, err = r.Client.RouteTables().ListRouteTable(ctx, opts)
+		if err != nil {
+			return nil, err
+		}
+		r.LogCtx.Debugf("getRouteTables listing tables with opts %+v; found %d routeTables", opts, len(rts))
 	}
-	if !strings.EqualFold(glooPluginConfig.RouteTableSelector.Namespace, "") {
-		opts.Namespace = glooPluginConfig.RouteTableSelector.Namespace
-	}
 
-	r.LogCtx.Debugf("getRouteTables listing tables with opts %+v", opts)
-	var err error
-
-	rts, err = r.Client.RouteTables().ListRouteTable(ctx, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	r.LogCtx.Debugf("getRouteTables listing tables with opts %+v; found %d routeTables", opts, len(rts))
 	for _, rt := range rts {
 		matchedRt := &GlooMatchedRouteTable{
 			RouteTable: rt,
