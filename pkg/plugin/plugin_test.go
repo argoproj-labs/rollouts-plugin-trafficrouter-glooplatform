@@ -12,6 +12,7 @@ import (
 
 	"github.com/PaesslerAG/gval"
 	"github.com/PaesslerAG/jsonpath"
+	"github.com/argoproj-labs/rollouts-plugin-trafficrouter-glooplatform/pkg/mocks"
 	"github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
 	rolloutsPlugin "github.com/argoproj/argo-rollouts/rollout/trafficrouting/plugin/rpc"
 	"github.com/ghodss/yaml"
@@ -63,10 +64,12 @@ func (tc *TestCase) Test(t *testing.T) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	mockClient := mocks.NewGlooMockClient([]*networkv2.RouteTable{tc.RouteTable})
+
 	rpcPluginImp := &RpcPlugin{
-		LogCtx:         logCtx,
-		IsTest:         true,
-		TestRouteTable: tc.RouteTable,
+		LogCtx: logCtx,
+		IsTest: true,
+		Client: mockClient,
 	}
 
 	var pluginMap = map[string]goPlugin.Plugin{

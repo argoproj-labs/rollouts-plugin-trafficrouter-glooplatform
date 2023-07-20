@@ -1,55 +1,45 @@
 package mocks
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"context"
+	"fmt"
 
-	commonv2 "github.com/solo-io/solo-apis/client-go/common.gloo.solo.io/v2"
-	networkv2 "github.com/solo-io/solo-apis/client-go/networking.gloo.solo.io/v2"
+	"github.com/argoproj-labs/rollouts-plugin-trafficrouter-glooplatform/pkg/gloo"
+	gloov2 "github.com/solo-io/solo-apis/client-go/networking.gloo.solo.io/v2"
+	k8sclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-const (
-	RouteTableName       = "mock"
-	RouteTableNamespace  = "mock"
-	DestinationKind      = "SERVICE"
-	DestinationNamespace = "mock"
-	StableService        = "stable"
-	CanaryService        = "canary"
-	RolloutNamespace     = "mock"
-	RolloutName          = "mock"
-)
-
-var RouteTable = networkv2.RouteTable{
-	ObjectMeta: metav1.ObjectMeta{
-		Name:      RouteTableName,
-		Namespace: RouteTableNamespace,
-	},
-	Spec: networkv2.RouteTableSpec{
-		Hosts: []string{"*"},
-
-		Http: []*networkv2.HTTPRoute{
-			{
-				Name: RouteTableName,
-				ActionType: &networkv2.HTTPRoute_ForwardTo{
-					ForwardTo: &networkv2.ForwardToAction{
-						Destinations: []*commonv2.DestinationReference{
-							{
-								Kind: commonv2.DestinationKind_SERVICE,
-								Port: &commonv2.PortSelector{
-									Specifier: &commonv2.PortSelector_Number{
-										Number: 8000,
-									},
-								},
-								RefKind: &commonv2.DestinationReference_Ref{
-									Ref: &commonv2.ObjectReference{
-										Name:      StableService,
-										Namespace: DestinationNamespace,
-									},
-								},
-							},
-						},
-					},
-				},
-			},
+func NewGlooMockClient(routeTables []*gloov2.RouteTable) gloo.NetworkV2ClientSet {
+	return &GlooMockClient{
+		rtClient: &glooMockRouteTableClient{
+			routeTables: routeTables,
 		},
-	},
+	}
+}
+
+type GlooMockClient struct {
+	rtClient *glooMockRouteTableClient
+}
+
+func (c GlooMockClient) RouteTables() gloo.RouteTableClient {
+	return c.rtClient
+}
+
+type glooMockRouteTableClient struct {
+	routeTables []*gloov2.RouteTable
+}
+
+func (c glooMockRouteTableClient) GetRouteTable(ctx context.Context, name string, namespace string) (*gloov2.RouteTable, error) {
+	if len(c.routeTables) > 0 {
+		return c.routeTables[0], nil
+	}
+	return nil, fmt.Errorf("routeTable not found: %s:%s", namespace, name)
+}
+
+func (c glooMockRouteTableClient) PatchRouteTable(ctx context.Context, obj *gloov2.RouteTable, patch k8sclient.Patch, opts ...k8sclient.PatchOption) error {
+	return nil
+}
+
+func (c glooMockRouteTableClient) ListRouteTable(ctx context.Context, opts ...k8sclient.ListOption) ([]*gloov2.RouteTable, error) {
+	return c.routeTables, nil
 }
