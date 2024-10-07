@@ -34,7 +34,7 @@ type TestCase struct {
 	Rollout        *v1alpha1.Rollout      `json:"rollout"`
 	RouteTable     *networkv2.RouteTable  `json:"routeTable"`
 	StepAssertions []StepAssertion        `json:"stepAssertions"`
-	asserionMap    map[int]*StepAssertion `json:"-"`
+	assertionMap   map[int]*StepAssertion `json:"-"`
 	fileName       string                 `json:"-"`
 }
 
@@ -72,7 +72,7 @@ func (tc *TestCase) Test(t *testing.T) error {
 		Client: mockClient,
 	}
 
-	var pluginMap = map[string]goPlugin.Plugin{
+	pluginMap := map[string]goPlugin.Plugin{
 		"RpcTrafficRouterPlugin": &rolloutsPlugin.RpcTrafficRouterPlugin{Impl: rpcPluginImp},
 	}
 
@@ -136,94 +136,22 @@ func (tc *TestCase) Test(t *testing.T) error {
 	t.Run(tc.fileName, func(t *testing.T) {
 		if tc.Rollout.Spec.Strategy.Canary != nil {
 			for index, step := range tc.Rollout.Spec.Strategy.Canary.Steps {
-				if sa, ok := tc.asserionMap[index+1]; ok {
+				if sa, ok := tc.assertionMap[index+1]; ok {
 					if step.SetWeight != nil {
 						rpcError := pluginInstance.SetWeight(tc.Rollout, *step.SetWeight, []v1alpha1.WeightDestination{})
 						assert.Empty(t, rpcError.ErrorString)
 
-						jsonRtBytes, err := json.Marshal(tc.RouteTable)
-						assert.Empty(t, err, "failed to marshal test case RouteTable")
-
-						// raw json is used for jsonpath expressions in test case files
-						rawJsonRt := interface{}(nil)
-						err = json.Unmarshal(jsonRtBytes, &rawJsonRt)
-						assert.Empty(t, err, "failed to unmarshal test case RouteTable")
-
-						for _, assertion := range sa.Assert {
-							gvalParams := map[string]interface{}{}
-
-							jPathValue, err := jsonpath.Get(assertion.Path, rawJsonRt)
-							assert.Empty(t, err, "failed to resolve jsonPath expression")
-
-							switch v := jPathValue.(type) {
-							case []interface{}:
-								// github.com/PaesslerAG/jsonpath is a little wonky when a filter expression is used in the path query
-								// if a filter was used, the result is always []interface{}
-								wasFilter := func() bool {
-									if len(v) == 1 {
-										switch filterV := v[0].(type) {
-										case string:
-											gvalParams["value"] = filterV
-											gvalParams["len"] = len(filterV)
-											return true
-										case int:
-											gvalParams["value"] = filterV
-											return true
-										case int8:
-											gvalParams["value"] = filterV
-											return true
-										case int16:
-											gvalParams["value"] = filterV
-											return true
-										case int32:
-											gvalParams["value"] = filterV
-											return true
-										case int64:
-											gvalParams["value"] = filterV
-											return true
-										case float32:
-											gvalParams["value"] = filterV
-											return true
-										case float64:
-											gvalParams["value"] = filterV
-											return true
-										case []interface{}:
-											gvalParams["value"] = filterV
-											gvalParams["len"] = len(filterV)
-											return true
-										default:
-											t.Fatalf("WARNING: test case parser doesn't understand FILTERED type %T", v[0])
-										}
-
-									}
-									return false
-								}()
-
-								if !wasFilter {
-									gvalParams["len"] = len(v)
-									gvalParams["value"] = v
-								}
-							case map[string]interface{}:
-								gvalParams["len"] = len(v)
-								gvalParams["value"] = v
-							case string:
-								gvalParams["len"] = len(v)
-								gvalParams["value"] = v
-							default:
-								t.Fatalf("test case parser doesn't understand type %T", v)
-							}
-
-							gvalResult, err := gval.Evaluate(assertion.Exp, gvalParams)
-							assert.Empty(t, err)
-							if isTrue, ok := gvalResult.(bool); ok {
-								assert.Equal(t, isTrue, true, "expression '%s' for path '%s' was false; value: %v (%T)", assertion.Exp, assertion.Path, gvalParams["value"], gvalParams["value"])
-							} else {
-								t.Logf("expression %s is not a bool expression", assertion.Exp)
-								t.Fail()
-							}
-						}
+						stepAssertion(t, sa, tc.RouteTable)
 						// assert.NotEqual(t, len(tc.RouteTable.Spec.Http[0].GetForwardTo().Destinations), 2)
 
+					}
+					if step.SetHeaderRoute != nil {
+						// test SetHeaderRoute
+						rpcError := pluginInstance.SetHeaderRoute(tc.Rollout, step.SetHeaderRoute)
+						assert.Empty(t, rpcError)
+						t.Log("beep.boop!!!", tc.RouteTable)
+
+						stepAssertion(t, sa, tc.RouteTable)
 					}
 				}
 			}
@@ -238,7 +166,6 @@ func (tc *TestCase) Test(t *testing.T) error {
 }
 
 func TestRollouts(t *testing.T) {
-
 	err := filepath.Walk("testfiles",
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -264,13 +191,13 @@ func TestRollouts(t *testing.T) {
 					return err
 				}
 
-				tc.asserionMap = make(map[int]*StepAssertion)
+				tc.assertionMap = make(map[int]*StepAssertion)
 
 				for _, sa := range tc.StepAssertions {
-					if existingSa, ok := tc.asserionMap[sa.Step]; ok {
+					if existingSa, ok := tc.assertionMap[sa.Step]; ok {
 						existingSa.Assert = append(existingSa.Assert, sa.Assert...)
 					} else {
-						tc.asserionMap[sa.Step] = &sa
+						tc.assertionMap[sa.Step] = &sa
 					}
 				}
 
@@ -283,4 +210,92 @@ func TestRollouts(t *testing.T) {
 		})
 
 	assert.Empty(t, err)
+}
+
+func stepAssertion(t *testing.T, sa *StepAssertion, rt *networkv2.RouteTable) {
+	t.Helper()
+	jsonRtBytes, err := json.Marshal(rt)
+	assert.Empty(t, err, "failed to marshal test case RouteTable")
+
+	// raw json is used for jsonpath expressions in test case files
+	rawJsonRt := interface{}(nil)
+	err = json.Unmarshal(jsonRtBytes, &rawJsonRt)
+	assert.Empty(t, err, "failed to unmarshal test case RouteTable")
+	for _, assertion := range sa.Assert {
+		gvalParams := map[string]interface{}{}
+
+		jPathValue, err := jsonpath.Get(assertion.Path, rawJsonRt)
+		assert.Empty(t, err, "failed to resolve jsonPath expression")
+
+		switch v := jPathValue.(type) {
+		case []interface{}:
+			// github.com/PaesslerAG/jsonpath is a little wonky when a filter expression is used in the path query
+			// if a filter was used, the result is always []interface{}
+			wasFilter := func() bool {
+				if len(v) == 1 {
+					switch filterV := v[0].(type) {
+					case string:
+						gvalParams["value"] = filterV
+						gvalParams["len"] = len(filterV)
+						return true
+					case int:
+						gvalParams["value"] = filterV
+						return true
+					case int8:
+						gvalParams["value"] = filterV
+						return true
+					case int16:
+						gvalParams["value"] = filterV
+						return true
+					case int32:
+						gvalParams["value"] = filterV
+						return true
+					case int64:
+						gvalParams["value"] = filterV
+						return true
+					case float32:
+						gvalParams["value"] = filterV
+						return true
+					case float64:
+						gvalParams["value"] = filterV
+						return true
+					case []interface{}:
+						gvalParams["value"] = filterV
+						gvalParams["len"] = len(filterV)
+						return true
+					default:
+						// this is probably not a concern but worth warning folks trying to write tests in case the tests are behaving oddly
+						t.Logf("WARNING: test case parser doesn't understand FILTERED type %T, value %v", v[0], v[0])
+					}
+				}
+				return false
+			}()
+
+			if !wasFilter {
+				gvalParams["len"] = len(v)
+				gvalParams["value"] = v
+			}
+		case map[string]interface{}:
+			gvalParams["len"] = len(v)
+			gvalParams["value"] = v
+		case string:
+			gvalParams["len"] = len(v)
+			gvalParams["value"] = v
+		default:
+			t.Fatalf("test case parser doesn't understand type %T", v)
+		}
+
+		gvalResult, err := gval.Evaluate(assertion.Exp, gvalParams)
+		assert.Empty(t, err)
+		if isTrue, ok := gvalResult.(bool); ok {
+			gvalKey := "value"
+			if strings.Contains(strings.Split(assertion.Exp, " ")[0], "len") {
+				gvalKey = "len"
+			}
+			assert.Equal(t, isTrue, true, "expression '%s' for path '%s' was false; value: %v (%T)", assertion.Exp, assertion.Path, gvalParams[gvalKey], gvalParams[gvalKey])
+		} else {
+			t.Logf("expression %s is not a bool expression", assertion.Exp)
+			t.Fail()
+		}
+	}
 }
