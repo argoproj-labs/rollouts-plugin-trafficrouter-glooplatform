@@ -1,0 +1,60 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: gloo-rollouts-demo
+  namespace: gloo-rollouts-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gloo-rollouts-demo
+  template:
+    metadata:
+      labels:
+        app: gloo-rollouts-demo
+    spec:
+      containers:
+      - image:  argoproj/rollouts-demo:blue
+        imagePullPolicy: IfNotPresent
+        name: gloo-rollouts-demo
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: 100m
+            memory: 100Mi
+  strategy:
+    canary:
+      canaryService: canary
+      stableService: stable
+      trafficRouting:
+        # managedRoutes are required for using setHeaderRoute
+        # routes specified here are owned by the plugin
+        # the plugin will create/delete these routes as needed
+        # do not specify routes which are already otherwise in use under this field
+        managedRoutes: 
+          - name: header-canary
+        plugins:
+          solo-io/glooplatform:
+            # canaryDestination describes where traffic matching the headers
+            # in setHeaderRoute will be sent
+            canaryDestination:
+              port:
+                number: 8080
+              ref:
+                name: canary
+                namespace: gloo-rollouts-demo
+            routeTableSelector:
+              labels:
+                app: demo
+              namespace: gloo-mesh
+      steps:
+      - setWeight: 10
+      - setHeaderRoute:
+          match:
+          - headerName: version
+            headerValue:
+              exact: canary
+          name: header-canary
+      - pause: {}
+      - setWeight: 100
