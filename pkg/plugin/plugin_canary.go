@@ -41,15 +41,17 @@ func (r *RpcPlugin) handleCanary(ctx context.Context, rollout *v1alpha1.Rollout,
 			}
 		}
 
-		// patch the RT
-		if !r.IsTest {
-			if err := r.Client.RouteTables().PatchRouteTable(ctx, rt.RouteTable, client.MergeFrom(ogRt)); err != nil {
-				return pluginTypes.RpcError{
-					ErrorString: fmt.Sprintf("failed to patch RouteTable: %s", err),
-				}
-			}
-			r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
+		// don't actually patch the RT
+		if r.IsTest {
+			continue
 		}
+		if err := r.Client.RouteTables().PatchRouteTable(ctx, rt.RouteTable, client.MergeFrom(ogRt)); err != nil {
+			return pluginTypes.RpcError{
+				ErrorString: fmt.Sprintf("failed to patch RouteTable: %s", err),
+			}
+		}
+		r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
+
 	}
 
 	return pluginTypes.RpcError{}
@@ -72,16 +74,16 @@ func (r *RpcPlugin) handleHeaderRoute(ctx context.Context, routeTables []*GlooMa
 		newRoutes = append(newRoutes, rt.RouteTable.Spec.Http...)
 		rt.RouteTable.Spec.Http = newRoutes
 
-		if !r.IsTest {
-			e := patchRouteTable(ctx, r.Client, rt.RouteTable, originalRouteTable)
-			if e != nil {
-				combinedError = errors.Join(combinedError, e)
-			} else {
-				r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
-			}
-		} else {
+		if r.IsTest {
 			r.LogCtx.Debugf("test route table http routes: %v", rt.RouteTable.Spec.Http)
+			continue
 		}
+		if e := patchRouteTable(ctx, r.Client, rt.RouteTable, originalRouteTable); e != nil {
+			combinedError = errors.Join(combinedError, e)
+			continue
+		}
+		r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
+
 	}
 
 	if combinedError != nil {

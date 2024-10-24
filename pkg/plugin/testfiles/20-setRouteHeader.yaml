@@ -39,7 +39,7 @@ rollout:
         steps:
         - setWeight: 10
         - setHeaderRoute:
-            name: "set-header-canary" # we should document that if this route already exists in their routeTable we may have a problem. I think we need to take the route specified in the routeTableSelector, copy it, adjust the name to this name, add a header match to the existing matches, ensure the dst in canary... 
+            name: "set-header-canary"
             match:
             - headerName: version
               headerValue:
@@ -71,14 +71,6 @@ routeTable:
             number: 8080
           kind: SERVICE
 stepAssertions:
-# - step: 1
-#   assert:
-#   - path: $.spec.http[0].forwardTo.destinations
-#     exp: len == 2
-#   - path: $.spec.http[0].forwardTo.destinations[?(@.ref.name=="stable")].weight
-#     exp: value == 90
-#   - path: $.spec.http[0].forwardTo.destinations[?(@.ref.name=="canary")].weight
-#     exp: value == 10
 - step: 2
   assert:
   - path: $.spec.http[0].forwardTo.destinations

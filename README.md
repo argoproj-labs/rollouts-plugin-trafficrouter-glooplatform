@@ -89,6 +89,8 @@ RouteTable and route selection is specified in the plugin config. Either a Route
 
 By defining a setHeaderRoute step in your canary rollout strategy you can instruct this plugin to crate a new routeTable route which will route to the specified canary destination when the header match is satisfied. This feature requires configuring managedRoutes, which grants the plugin ownership over all routes in the routeTable which have the same name. Caution should be used when adding a name to this list because the plugin may overwrite and/or delete any routes it is allowed to manage as needed to implement the behavior specifid in the setHeaderRoute step.
 
+**Known Limitations** in 0.0.0-beta3 setHeaderRoute __does not__ support prefix header matching and will panic.
+
 ```yaml
   strategy:
     canary:

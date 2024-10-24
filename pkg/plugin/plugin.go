@@ -234,16 +234,16 @@ func (r *RpcPlugin) RemoveManagedRoutes(rollout *v1alpha1.Rollout) pluginTypes.R
 		})
 
 		rt.RouteTable.Spec.Http = newRoutes
-		if !r.IsTest {
-			e := patchRouteTable(ctx, r.Client, rt.RouteTable, originalRouteTable)
-			if e != nil {
-				combinedError = errors.Join(combinedError, e)
-			} else {
-				r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
-			}
-		} else {
+		if r.IsTest {
 			r.LogCtx.Debugf("test route table http routes: %v", rt.RouteTable.Spec.Http)
+			continue
 		}
+		if e := patchRouteTable(ctx, r.Client, rt.RouteTable, originalRouteTable); e != nil {
+			combinedError = errors.Join(combinedError, e)
+			continue
+		}
+		r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
+
 	}
 
 	if combinedError != nil {
@@ -443,9 +443,7 @@ func buildGlooMatches(headerRouting *v1alpha1.SetHeaderRoute) *solov2.HTTPReques
 			matchValue = m.HeaderValue.Regex
 			isRegex = true
 		} else if m.HeaderValue.Prefix != "" {
-			// error, do nothing?
-			// try to convert to a regex for the user?
-			panic("TODO: impl some handling of prefix")
+			panic("TODO: Prefix matching is not supported by the glooplatform plugin.")
 		}
 		headerMatcher := &solov2.HeaderMatcher{
 			Name:  m.HeaderName,

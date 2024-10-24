@@ -149,8 +149,6 @@ func (tc *TestCase) Test(t *testing.T) error {
 						// test SetHeaderRoute
 						rpcError := pluginInstance.SetHeaderRoute(tc.Rollout, step.SetHeaderRoute)
 						assert.Empty(t, rpcError)
-						t.Log("beep.boop!!!", tc.RouteTable)
-
 						stepAssertion(t, sa, tc.RouteTable)
 					}
 				}
