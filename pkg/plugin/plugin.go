@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -443,7 +444,8 @@ func buildGlooMatches(headerRouting *v1alpha1.SetHeaderRoute) *solov2.HTTPReques
 			matchValue = m.HeaderValue.Regex
 			isRegex = true
 		} else if m.HeaderValue.Prefix != "" {
-			panic("TODO: Prefix matching is not supported by the glooplatform plugin.")
+			matchValue = "^" + regexp.QuoteMeta(m.HeaderValue.Prefix)
+			isRegex = true
 		}
 		headerMatcher := &solov2.HeaderMatcher{
 			Name:  m.HeaderName,
