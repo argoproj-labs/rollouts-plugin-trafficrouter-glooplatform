@@ -34,25 +34,25 @@ type RpcPlugin struct {
 }
 
 type GlooPlatformAPITrafficRouting struct {
-	RouteTableSelector *SimpleObjectSelector       `json:"routeTableSelector" protobuf:"bytes,1,name=routeTableSelector"`
-	RouteSelector      *SimpleRouteSelector        `json:"routeSelector" protobuf:"bytes,2,name=routeSelector"`
-	CanaryDestination  *SimpleDestinationReference `json:"canaryDestination" protobuf:"bytes,3,name=canaryDestination"`
+	RouteTableSelector *SimpleObjectSelector `json:"routeTableSelector" protobuf:"bytes,1,name=routeTableSelector"`
+	RouteSelector      *SimpleRouteSelector  `json:"routeSelector" protobuf:"bytes,2,name=routeSelector"`
+	// CanaryDestination  *SimpleDestinationReference `json:"canaryDestination" protobuf:"bytes,3,name=canaryDestination"`
 }
 
-type SimpleObjectReference struct {
-	Name      string `json:"name"`
-	Namespace string `json:"namespace"`
-}
+// type SimpleObjectReference struct {
+// 	Name      string `json:"name"`
+// 	Namespace string `json:"namespace"`
+// }
 
-type SimpleDestinationReference struct {
-	Reference SimpleObjectReference `json:"ref"`
-	Port      SimplePort            `json:"port"`
-}
+// type SimpleDestinationReference struct {
+// 	Reference SimpleObjectReference `json:"ref"`
+// 	Port      SimplePort            `json:"port"`
+// }
 
-type SimplePort struct {
-	Name   string `json:"name"`
-	Number uint32 `json:"number"`
-}
+// type SimplePort struct {
+// 	Name   string `json:"name"`
+// 	Number uint32 `json:"number"`
+// }
 
 type SimpleObjectSelector struct {
 	Labels    map[string]string `json:"labels" protobuf:"bytes,1,name=labels"`
@@ -161,12 +161,6 @@ func (r *RpcPlugin) SetHeaderRoute(rollout *v1alpha1.Rollout, headerRouting *v1a
 			ErrorString: err.Error(),
 		}
 	}
-	if glooPluginConfig.CanaryDestination == nil {
-		return pluginTypes.RpcError{
-			ErrorString: "CanaryDestination must be specified when using setHeaderRoute with " + PluginName,
-		}
-	}
-
 	// get the matched routetables
 	matchedRts, err := r.getRouteTables(ctx, rollout, glooPluginConfig)
 	if err != nil {
@@ -176,13 +170,12 @@ func (r *RpcPlugin) SetHeaderRoute(rollout *v1alpha1.Rollout, headerRouting *v1a
 	}
 	if len(matchedRts) == 0 {
 		// nothing to update, don't bother computing things
-		return pluginTypes.RpcError{}
+		return pluginTypes.RpcError{
+			ErrorString: "",
+		}
 	}
 
-	canaryHeaderHTTPRoute := buildGlooHTTPRoute(headerRouting.Name,
-		buildGlooMatches(headerRouting),
-		glooPluginConfig.CanaryDestination)
-	return r.handleHeaderRoute(ctx, matchedRts, canaryHeaderHTTPRoute)
+	return r.handleHeaderRoute(ctx, matchedRts, buildGlooMatches(headerRouting), headerRouting.Name, rollout.Spec.Strategy.Canary.CanaryService)
 }
 
 func (r *RpcPlugin) SetMirrorRoute(rollout *v1alpha1.Rollout, setMirrorRoute *v1alpha1.SetMirrorRoute) pluginTypes.RpcError {
@@ -399,35 +392,35 @@ func (g *GlooMatchedRouteTable) matchRoutes(logCtx *logrus.Entry, rollout *v1alp
 	return nil
 }
 
-func buildGlooHTTPRoute(name string, matcher *solov2.HTTPRequestMatcher, canaryDestination *SimpleDestinationReference) *GlooMatchedHttpRoutes {
-	return &GlooMatchedHttpRoutes{
-		HttpRoute: &networkv2.HTTPRoute{
-			Name: name,
-			Matchers: []*solov2.HTTPRequestMatcher{
-				matcher,
-			},
-			ActionType: &networkv2.HTTPRoute_ForwardTo{
-				ForwardTo: &networkv2.ForwardToAction{
-					Destinations: []*solov2.DestinationReference{
-						{
-							RefKind: &solov2.DestinationReference_Ref{
-								Ref: &solov2.ObjectReference{
-									Name:      canaryDestination.Reference.Name,
-									Namespace: canaryDestination.Reference.Namespace,
-								},
-							},
-							Port: &solov2.PortSelector{
-								Specifier: &solov2.PortSelector_Number{
-									Number: canaryDestination.Port.Number,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-}
+// func buildGlooHTTPRoute(name string, matcher *solov2.HTTPRequestMatcher, canaryDestination *SimpleDestinationReference) *GlooMatchedHttpRoutes {
+// 	return &GlooMatchedHttpRoutes{
+// 		HttpRoute: &networkv2.HTTPRoute{
+// 			Name: name,
+// 			Matchers: []*solov2.HTTPRequestMatcher{
+// 				matcher,
+// 			},
+// 			ActionType: &networkv2.HTTPRoute_ForwardTo{
+// 				ForwardTo: &networkv2.ForwardToAction{
+// 					Destinations: []*solov2.DestinationReference{
+// 						{
+// 							RefKind: &solov2.DestinationReference_Ref{
+// 								Ref: &solov2.ObjectReference{
+// 									Name:      canaryDestination.Reference.Name,
+// 									Namespace: canaryDestination.Reference.Namespace,
+// 								},
+// 							},
+// 							Port: &solov2.PortSelector{
+// 								Specifier: &solov2.PortSelector_Number{
+// 									Number: canaryDestination.Port.Number,
+// 								},
+// 							},
+// 						},
+// 					},
+// 				},
+// 			},
+// 		},
+// 	}
+// }
 
 func buildGlooMatches(headerRouting *v1alpha1.SetHeaderRoute) *solov2.HTTPRequestMatcher {
 	matcher := &solov2.HTTPRequestMatcher{

@@ -10,6 +10,8 @@ import (
 	pluginTypes "github.com/argoproj/argo-rollouts/utils/plugin/types"
 	solov2 "github.com/solo-io/solo-apis/client-go/common.gloo.solo.io/v2"
 	networkv2 "github.com/solo-io/solo-apis/client-go/networking.gloo.solo.io/v2"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -63,16 +65,54 @@ func (r *RpcPlugin) newCanaryDest(stableDest *solov2.DestinationReference, rollo
 	return newDest, nil
 }
 
-func (r *RpcPlugin) handleHeaderRoute(ctx context.Context, routeTables []*GlooMatchedRouteTable, headerRoute *GlooMatchedHttpRoutes) pluginTypes.RpcError {
+func typedCloneProto[T protoreflect.ProtoMessage](p T) T {
+	return proto.Clone(p).(T)
+}
+
+func (r *RpcPlugin) getOrDeriveCanary(mrt *GlooMatchedHttpRoutes, canaryService string) *networkv2.HTTPRoute_ForwardTo {
+	if mrt.Destinations.CanaryOrPreviewDestination != nil {
+		return &networkv2.HTTPRoute_ForwardTo{
+			ForwardTo: &networkv2.ForwardToAction{
+				Destinations: []*solov2.DestinationReference{typedCloneProto(mrt.Destinations.CanaryOrPreviewDestination)},
+			},
+		}
+	}
+	if mrt.Destinations.StableOrActiveDestination != nil {
+		newCanary := typedCloneProto(mrt.Destinations.StableOrActiveDestination)
+		newCanary.GetRef().Name = canaryService
+		return &networkv2.HTTPRoute_ForwardTo{
+			ForwardTo: &networkv2.ForwardToAction{
+				Destinations: []*solov2.DestinationReference{newCanary},
+			},
+		}
+	}
+	return nil // we don't have a canary and can't derive one
+}
+
+func (r *RpcPlugin) handleHeaderRoute(ctx context.Context, routeTables []*GlooMatchedRouteTable, matcher *solov2.HTTPRequestMatcher, shrName string, canaryService string) pluginTypes.RpcError {
 	var combinedError error
 	for _, rt := range routeTables {
 		originalRouteTable := &networkv2.RouteTable{}
 		rt.RouteTable.DeepCopyInto(originalRouteTable)
 
-		newRoutes := make([]*networkv2.HTTPRoute, 1)
-		newRoutes[0] = headerRoute.HttpRoute
-		newRoutes = append(newRoutes, rt.RouteTable.Spec.Http...)
-		rt.RouteTable.Spec.Http = newRoutes
+		newHeaderRoutes := make([]*networkv2.HTTPRoute, 0)
+
+		for _, route := range rt.HttpRoutes {
+			canaryDestination := r.getOrDeriveCanary(route, canaryService)
+			setHeaderRoute := typedCloneProto(route.HttpRoute)
+			matcher := typedCloneProto(matcher)
+			setHeaderRoute.ActionType = canaryDestination
+
+			matchers := []*solov2.HTTPRequestMatcher{matcher}
+			setHeaderRoute.Matchers = append(matchers, setHeaderRoute.Matchers...)
+			setHeaderRoute.Name = shrName
+
+			newHeaderRoutes = append(newHeaderRoutes, setHeaderRoute)
+
+		}
+
+		newHeaderRoutes = append(newHeaderRoutes, rt.RouteTable.Spec.Http...)
+		rt.RouteTable.Spec.Http = newHeaderRoutes
 
 		if r.IsTest {
 			r.LogCtx.Debugf("test route table http routes: %v", rt.RouteTable.Spec.Http)
