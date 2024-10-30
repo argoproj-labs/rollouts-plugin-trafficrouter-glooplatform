@@ -171,7 +171,7 @@ func (r *RpcPlugin) SetHeaderRoute(rollout *v1alpha1.Rollout, headerRouting *v1a
 	if len(matchedRts) == 0 {
 		// nothing to update, don't bother computing things
 		return pluginTypes.RpcError{
-			ErrorString: "",
+			ErrorString: "unable to find qualifying RouteTables", // TODO: include the selection criteria which failed (may require update to getRouteTables to do nicely)
 		}
 	}
 
@@ -302,7 +302,7 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		}
 		// destination matching
 		if err := matchedRt.matchRoutes(r.LogCtx, rollout, glooPluginConfig); err != nil {
-			return nil, err
+			return nil, err // TODO: don't short circuit, potentially other RTs will match if we continue instead of immediately returning an error
 		}
 
 		matched = append(matched, matchedRt)

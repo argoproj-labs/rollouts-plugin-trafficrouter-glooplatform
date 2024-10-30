@@ -71,15 +71,18 @@ func typedCloneProto[T protoreflect.ProtoMessage](p T) T {
 
 func (r *RpcPlugin) getOrDeriveCanary(mrt *GlooMatchedHttpRoutes, canaryService string) *networkv2.HTTPRoute_ForwardTo {
 	if mrt.Destinations.CanaryOrPreviewDestination != nil {
+		canary := typedCloneProto(mrt.Destinations.CanaryOrPreviewDestination)
+		canary.Weight = 0
 		return &networkv2.HTTPRoute_ForwardTo{
 			ForwardTo: &networkv2.ForwardToAction{
-				Destinations: []*solov2.DestinationReference{typedCloneProto(mrt.Destinations.CanaryOrPreviewDestination)},
+				Destinations: []*solov2.DestinationReference{canary},
 			},
 		}
 	}
 	if mrt.Destinations.StableOrActiveDestination != nil {
 		newCanary := typedCloneProto(mrt.Destinations.StableOrActiveDestination)
 		newCanary.GetRef().Name = canaryService
+		newCanary.Weight = 0
 		return &networkv2.HTTPRoute_ForwardTo{
 			ForwardTo: &networkv2.ForwardToAction{
 				Destinations: []*solov2.DestinationReference{newCanary},
@@ -89,7 +92,7 @@ func (r *RpcPlugin) getOrDeriveCanary(mrt *GlooMatchedHttpRoutes, canaryService 
 	return nil // we don't have a canary and can't derive one
 }
 
-func (r *RpcPlugin) handleHeaderRoute(ctx context.Context, routeTables []*GlooMatchedRouteTable, matcher *solov2.HTTPRequestMatcher, shrName string, canaryService string) pluginTypes.RpcError {
+func (r *RpcPlugin) handleHeaderRoute(ctx context.Context, routeTables []*GlooMatchedRouteTable, matcher *solov2.HTTPRequestMatcher, setHeaderRouteName string, canaryServiceName string) pluginTypes.RpcError {
 	var combinedError error
 	for _, rt := range routeTables {
 		originalRouteTable := &networkv2.RouteTable{}
@@ -98,14 +101,13 @@ func (r *RpcPlugin) handleHeaderRoute(ctx context.Context, routeTables []*GlooMa
 		newHeaderRoutes := make([]*networkv2.HTTPRoute, 0)
 
 		for _, route := range rt.HttpRoutes {
-			canaryDestination := r.getOrDeriveCanary(route, canaryService)
+			canaryDestination := r.getOrDeriveCanary(route, canaryServiceName)
 			setHeaderRoute := typedCloneProto(route.HttpRoute)
 			matcher := typedCloneProto(matcher)
 			setHeaderRoute.ActionType = canaryDestination
-
 			matchers := []*solov2.HTTPRequestMatcher{matcher}
 			setHeaderRoute.Matchers = append(matchers, setHeaderRoute.Matchers...)
-			setHeaderRoute.Name = shrName
+			setHeaderRoute.Name = setHeaderRouteName
 
 			newHeaderRoutes = append(newHeaderRoutes, setHeaderRoute)
 
