@@ -26,7 +26,7 @@ const (
 )
 
 type RpcPlugin struct {
-	IsTest bool
+	IsTest bool // TODO: remove in favor of improved test clients and/or refactoring to allow enhanced test coverage which does not require test clients
 	// temporary hack until mock clienset is fixed (missing some interface methods)
 	// TestRouteTable *networkv2.RouteTable
 	LogCtx *logrus.Entry
@@ -36,23 +36,7 @@ type RpcPlugin struct {
 type GlooPlatformAPITrafficRouting struct {
 	RouteTableSelector *SimpleObjectSelector `json:"routeTableSelector" protobuf:"bytes,1,name=routeTableSelector"`
 	RouteSelector      *SimpleRouteSelector  `json:"routeSelector" protobuf:"bytes,2,name=routeSelector"`
-	// CanaryDestination  *SimpleDestinationReference `json:"canaryDestination" protobuf:"bytes,3,name=canaryDestination"`
 }
-
-// type SimpleObjectReference struct {
-// 	Name      string `json:"name"`
-// 	Namespace string `json:"namespace"`
-// }
-
-// type SimpleDestinationReference struct {
-// 	Reference SimpleObjectReference `json:"ref"`
-// 	Port      SimplePort            `json:"port"`
-// }
-
-// type SimplePort struct {
-// 	Name   string `json:"name"`
-// 	Number uint32 `json:"number"`
-// }
 
 type SimpleObjectSelector struct {
 	Labels    map[string]string `json:"labels" protobuf:"bytes,1,name=labels"`
@@ -391,36 +375,6 @@ func (g *GlooMatchedRouteTable) matchRoutes(logCtx *logrus.Entry, rollout *v1alp
 
 	return nil
 }
-
-// func buildGlooHTTPRoute(name string, matcher *solov2.HTTPRequestMatcher, canaryDestination *SimpleDestinationReference) *GlooMatchedHttpRoutes {
-// 	return &GlooMatchedHttpRoutes{
-// 		HttpRoute: &networkv2.HTTPRoute{
-// 			Name: name,
-// 			Matchers: []*solov2.HTTPRequestMatcher{
-// 				matcher,
-// 			},
-// 			ActionType: &networkv2.HTTPRoute_ForwardTo{
-// 				ForwardTo: &networkv2.ForwardToAction{
-// 					Destinations: []*solov2.DestinationReference{
-// 						{
-// 							RefKind: &solov2.DestinationReference_Ref{
-// 								Ref: &solov2.ObjectReference{
-// 									Name:      canaryDestination.Reference.Name,
-// 									Namespace: canaryDestination.Reference.Namespace,
-// 								},
-// 							},
-// 							Port: &solov2.PortSelector{
-// 								Specifier: &solov2.PortSelector_Number{
-// 									Number: canaryDestination.Port.Number,
-// 								},
-// 							},
-// 						},
-// 					},
-// 				},
-// 			},
-// 		},
-// 	}
-// }
 
 func buildGlooMatches(headerRouting *v1alpha1.SetHeaderRoute) *solov2.HTTPRequestMatcher {
 	matcher := &solov2.HTTPRequestMatcher{
