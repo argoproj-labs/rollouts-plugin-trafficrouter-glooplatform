@@ -27,12 +27,6 @@ rollout:
         trafficRouting:
           plugins:
             solo-io/glooplatform:
-              canaryDestination:
-                ref:
-                  name: canary
-                  namespace: gloo-demo-rollout
-                port:
-                  number: 8099
               routeTableSelector:
                 name: demo
                 namespace: gloo-mesh

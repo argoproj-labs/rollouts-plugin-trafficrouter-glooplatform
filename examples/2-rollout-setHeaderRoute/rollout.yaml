@@ -36,14 +36,6 @@ spec:
           - name: header-canary
         plugins:
           solo-io/glooplatform:
-            # canaryDestination describes where traffic matching the headers
-            # in setHeaderRoute will be sent
-            canaryDestination:
-              port:
-                number: 8080
-              ref:
-                name: canary
-                namespace: gloo-rollouts-demo
             routeTableSelector:
               labels:
                 app: demo
