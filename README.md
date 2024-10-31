@@ -47,11 +47,20 @@ The plugin can be loaded into the controller runtime by building your own Argo R
 
 See [Kustomize patches](./deploy/kustomization.yaml) in this repo for Argo Rollouts configuration examples.
 
-### Usage
+### Canary Rollouts
+
+As of version 0.0.0-beta3 support for header-based routing has been added to the original weighted routing features.
+
+When defining your RouteTable you must define at least a HTTPRoute (under .spec.http) which contains a 'forwardTo' destination for your stable/active service. The plugin will attempt to derive your canary destination from the stable destination if you do not define the canary destination yourself in your RouteTable. This is could lead to incorrect config if your canary service differs significantly from your stable service. This can be handled by defining the canary service in your RouteTable but setting it's weight to 0 and the weight of your stable to 100. 
 
 Canary and stable services in the Rollout spec must refer to `forwardTo` destinations in [routes](https://docs.solo.io/gloo-mesh-enterprise/latest/troubleshooting/gloo/routes/) that exist in one or more Gloo Platform RouteTables.
 
 RouteTable and route selection is specified in the plugin config. Either a RouteTable label selector or a named RouteTable must be specified. RouteSelector is entirely optional; this is useful to limit matches to specific routes in a RouteTable if it contains any references to canary or stable services that you do not want to modify.
+
+
+#### Weighted Routing
+
+Weighted Routing allows you to define one or more steps, which can include actions such as changing the canary service's weight or pausing the rollout.
 
 ```yaml
   strategy:
@@ -79,7 +88,46 @@ RouteTable and route selection is specified in the plugin config. Either a Route
                 route: demo-preview
               # (optional) select a specific route by name
               # name: route-name
+      steps:
+      - setWeight: 25
+      - pause: {}
+      - setWeight: 100
 ```
+
+#### Header-based Canary Routing
+
+By defining a setHeaderRoute step in your canary rollout strategy you can instruct this plugin to crate a new routeTable route which will route to the canary destination when the header match is satisfied. This feature requires configuring managedRoutes, which grants the plugin ownership over all routes in the routeTable which have the same name. Caution should be used when adding a name to this list because the plugin may overwrite and/or delete any routes it is allowed to manage as needed to implement the behavior specifid in the setHeaderRoute step.
+
+```yaml
+  strategy:
+    canary:
+      canaryService: canary
+      stableService: stable
+      trafficRouting:
+        # managedRoutes are required for using setHeaderRoute
+        # routes specified here are owned by the plugin
+        # the plugin will create/delete these routes as needed
+        # do not specify routes which are already otherwise in use under this field
+        managedRoutes: 
+          - name: header-canary
+        plugins:
+          # the plugin name must match the name used in argo-rollouts-config ConfigMap
+          solo-io/glooplatform:
+            routeTableSelector:
+              labels:
+                app: demo
+              namespace: gloo-mesh
+      steps:
+      - setHeaderRoute:
+          match:
+          - headerName: version
+            headerValue:
+              exact: canary
+          name: header-canary
+      - pause: {}
+      - setWeight: 100
+```
+
 ### Supported Gloo Platform Versions
 
 * All Gloo Platform versions 2.0 and newer

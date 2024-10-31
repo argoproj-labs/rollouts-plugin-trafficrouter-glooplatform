@@ -3,7 +3,10 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/argoproj-labs/rollouts-plugin-trafficrouter-glooplatform/pkg/gloo"
@@ -23,7 +26,7 @@ const (
 )
 
 type RpcPlugin struct {
-	IsTest bool
+	IsTest bool // TODO: remove in favor of improved test clients and/or refactoring to allow enhanced test coverage which does not require test clients
 	// temporary hack until mock clienset is fixed (missing some interface methods)
 	// TestRouteTable *networkv2.RouteTable
 	LogCtx *logrus.Entry
@@ -31,17 +34,17 @@ type RpcPlugin struct {
 }
 
 type GlooPlatformAPITrafficRouting struct {
-	RouteTableSelector *DumbObjectSelector `json:"routeTableSelector" protobuf:"bytes,1,name=routeTableSelector"`
-	RouteSelector      *DumbRouteSelector  `json:"routeSelector" protobuf:"bytes,2,name=routeSelector"`
+	RouteTableSelector *SimpleObjectSelector `json:"routeTableSelector" protobuf:"bytes,1,name=routeTableSelector"`
+	RouteSelector      *SimpleRouteSelector  `json:"routeSelector" protobuf:"bytes,2,name=routeSelector"`
 }
 
-type DumbObjectSelector struct {
+type SimpleObjectSelector struct {
 	Labels    map[string]string `json:"labels" protobuf:"bytes,1,name=labels"`
 	Name      string            `json:"name" protobuf:"bytes,2,name=name"`
 	Namespace string            `json:"namespace" protobuf:"bytes,3,name=namespace"`
 }
 
-type DumbRouteSelector struct {
+type SimpleRouteSelector struct {
 	Labels map[string]string `json:"labels" protobuf:"bytes,1,name=labels"`
 	Name   string            `json:"name" protobuf:"bytes,2,name=name"`
 }
@@ -133,7 +136,30 @@ func (r *RpcPlugin) SetWeight(rollout *v1alpha1.Rollout, desiredWeight int32, ad
 }
 
 func (r *RpcPlugin) SetHeaderRoute(rollout *v1alpha1.Rollout, headerRouting *v1alpha1.SetHeaderRoute) pluginTypes.RpcError {
-	return pluginTypes.RpcError{}
+	r.LogCtx.Debugln("SetHeaderRoute")
+	ctx := context.TODO()
+
+	glooPluginConfig, err := getPluginConfig(rollout)
+	if err != nil {
+		return pluginTypes.RpcError{
+			ErrorString: err.Error(),
+		}
+	}
+	// get the matched routetables
+	matchedRts, err := r.getRouteTables(ctx, rollout, glooPluginConfig)
+	if err != nil {
+		return pluginTypes.RpcError{
+			ErrorString: err.Error(),
+		}
+	}
+	if len(matchedRts) == 0 {
+		// nothing to update, don't bother computing things
+		return pluginTypes.RpcError{
+			ErrorString: "unable to find qualifying RouteTables", // TODO: include the selection criteria which failed (may require update to getRouteTables to do nicely)
+		}
+	}
+
+	return r.handleHeaderRoute(ctx, matchedRts, buildGlooMatches(headerRouting), headerRouting.Name, rollout.Spec.Strategy.Canary.CanaryService)
 }
 
 func (r *RpcPlugin) SetMirrorRoute(rollout *v1alpha1.Rollout, setMirrorRoute *v1alpha1.SetMirrorRoute) pluginTypes.RpcError {
@@ -145,23 +171,70 @@ func (r *RpcPlugin) VerifyWeight(rollout *v1alpha1.Rollout, desiredWeight int32,
 }
 
 func (r *RpcPlugin) RemoveManagedRoutes(rollout *v1alpha1.Rollout) pluginTypes.RpcError {
-	// we could remove the canary destination, but not required since it will have 0 weight at the end of rollout
+	if !slices.ContainsFunc(rollout.Spec.Strategy.Canary.Steps, func(s v1alpha1.CanaryStep) bool {
+		return s.SetHeaderRoute != nil
+	}) {
+		// none of the steps have a SetHeaderRoute so nothing to clean up
+		return pluginTypes.RpcError{}
+	}
+
+	ctx := context.TODO()
+	glooPluginConfig, err := getPluginConfig(rollout)
+	if err != nil {
+		return pluginTypes.RpcError{
+			ErrorString: err.Error(),
+		}
+	}
+
+	// get the matched routetables
+	matchedRts, err := r.getRouteTables(ctx, rollout, glooPluginConfig)
+	if err != nil {
+		return pluginTypes.RpcError{
+			ErrorString: err.Error(),
+		}
+	}
+	if len(matchedRts) == 0 {
+		// nothing to update, don't bother computing things
+		return pluginTypes.RpcError{}
+	}
+
+	var combinedError error
+	for _, rt := range matchedRts {
+		originalRouteTable := &networkv2.RouteTable{}
+		rt.RouteTable.DeepCopyInto(originalRouteTable)
+		newRoutes := slices.DeleteFunc(rt.RouteTable.Spec.Http, func(r *networkv2.HTTPRoute) bool {
+			for _, managed := range rollout.Spec.Strategy.Canary.TrafficRouting.ManagedRoutes {
+				if strings.EqualFold(r.GetName(), managed.Name) {
+					return true
+				}
+			}
+			return false
+		})
+
+		rt.RouteTable.Spec.Http = newRoutes
+		if r.IsTest {
+			r.LogCtx.Debugf("test route table http routes: %v", rt.RouteTable.Spec.Http)
+			continue
+		}
+		if e := patchRouteTable(ctx, r.Client, rt.RouteTable, originalRouteTable); e != nil {
+			combinedError = errors.Join(combinedError, e)
+			continue
+		}
+		r.LogCtx.Debugf("patched route table %s.%s", rt.RouteTable.Namespace, rt.RouteTable.Name)
+
+	}
+
+	if combinedError != nil {
+		return pluginTypes.RpcError{
+			ErrorString: combinedError.Error(),
+		}
+	}
+
 	return pluginTypes.RpcError{}
 }
 
 func (r *RpcPlugin) Type() string {
 	return Type
-}
-
-func getPluginConfig(rollout *v1alpha1.Rollout) (*GlooPlatformAPITrafficRouting, error) {
-	glooplatformConfig := GlooPlatformAPITrafficRouting{}
-
-	err := json.Unmarshal(rollout.Spec.Strategy.Canary.TrafficRouting.Plugins[PluginName], &glooplatformConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	return &glooplatformConfig, nil
 }
 
 func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollout, glooPluginConfig *GlooPlatformAPITrafficRouting) ([]*GlooMatchedRouteTable, error) {
@@ -213,7 +286,7 @@ func (r *RpcPlugin) getRouteTables(ctx context.Context, rollout *v1alpha1.Rollou
 		}
 		// destination matching
 		if err := matchedRt.matchRoutes(r.LogCtx, rollout, glooPluginConfig); err != nil {
-			return nil, err
+			return nil, err // TODO: don't short circuit, potentially other RTs will match if we continue instead of immediately returning an error
 		}
 
 		matched = append(matched, matchedRt)
@@ -296,10 +369,48 @@ func (g *GlooMatchedRouteTable) matchRoutes(logCtx *logrus.Entry, rollout *v1alp
 					CanaryOrPreviewDestination: canary,
 				},
 			}
-			logCtx.Debugf("adding destination %+v", dest)
 			g.HttpRoutes = append(g.HttpRoutes, dest)
 		}
 	} // end range httpRoutes
 
 	return nil
+}
+
+func buildGlooMatches(headerRouting *v1alpha1.SetHeaderRoute) *solov2.HTTPRequestMatcher {
+	matcher := &solov2.HTTPRequestMatcher{
+		Name:    headerRouting.Name + "-matcher",
+		Headers: []*solov2.HeaderMatcher{},
+	}
+
+	for _, m := range headerRouting.Match {
+		var isRegex bool
+		var matchValue string
+		if m.HeaderValue.Exact != "" {
+			matchValue = m.HeaderValue.Exact
+		} else if m.HeaderValue.Regex != "" {
+			matchValue = m.HeaderValue.Regex
+			isRegex = true
+		} else if m.HeaderValue.Prefix != "" {
+			matchValue = "^" + regexp.QuoteMeta(m.HeaderValue.Prefix)
+			isRegex = true
+		}
+		headerMatcher := &solov2.HeaderMatcher{
+			Name:  m.HeaderName,
+			Value: matchValue,
+			Regex: isRegex,
+		}
+		matcher.Headers = append(matcher.Headers, headerMatcher)
+	}
+	return matcher
+}
+
+func getPluginConfig(rollout *v1alpha1.Rollout) (*GlooPlatformAPITrafficRouting, error) {
+	glooplatformConfig := GlooPlatformAPITrafficRouting{}
+
+	err := json.Unmarshal(rollout.Spec.Strategy.Canary.TrafficRouting.Plugins[PluginName], &glooplatformConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	return &glooplatformConfig, nil
 }
