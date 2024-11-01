@@ -135,7 +135,7 @@ By defining a setHeaderRoute step in your canary rollout strategy you can instru
 ### TODO
 
 - implement [blue/green](./pkg/plugin/plugin_bluegreen.go)
-- implement `SetHeaderRoute` and `SetMirrorRoute` in [plugin.go](./pkg/plugin/plugin.go)
+- implement `SetMirrorRoute` in [plugin.go](./pkg/plugin/plugin.go)
 - unit tests
   - update tests with mock gloo client using interfaces in [./pkg/gloo/client.go](./pkg/gloo/client.go)
   - add more tests
